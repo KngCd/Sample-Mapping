@@ -27,11 +27,36 @@
         <title>Sample Mapping</title>
     </head>
     <body>
+        <div id="loader-container">
+            <div class="loader"></div>
+            <div class="loader-text">Loading map...</div>
+        </div>
+
+        <div id="form-container">
+            <form id="locationForm">
+                <label>Select Location:</label>
+                <input type="text" id="location" readonly required><br>
+
+                <label>Description:</label>
+                <textarea id="description" required></textarea><br>
+
+                <button type="submit">Add to Map</button>
+            </form>
+        </div>
+
+        <div id="legend">
+            <h4>Legend</h4>
+            <ul>
+                <li><span style="background: rgba(190,178,151,1.0); width: 10px; height: 10px; display: inline-block;"></span> Buildings</li>
+            </ul>
+        </div>
+
         <div id="map">
         </div>
+        <!-- Scripts -->
         <script src="js/qgis2web_expressions.js"></script>
         <script src="js/leaflet.js"></script>
-        <script src="js/L.Control.Layers.Tree.min.js"></script>
+        <!-- <script src="js/L.Control.Layers.Tree.min.js"></script> -->
         <script src="js/L.Control.Locate.min.js"></script>
         <script src="js/leaflet.rotatedMarker.js"></script>
         <script src="js/leaflet.pattern.js"></script>
@@ -42,15 +67,75 @@
         <script src="js/labels.js"></script>
         <script src="js/leaflet-measure.js"></script>
         <script src="js/leaflet-search.js"></script>
+
+        <!-- GeoJSON Data -->
         <script src="data/PG_Brgy_Boundary_Cadastral_edited_1.js"></script>
         <script src="data/Buildings_2.js"></script>
+
+        <!-- Initialize Map (Make sure it's the last script to load) -->
+        <!-- <script src="js/map-init.js"></script> -->
         <script>
+        var highlightLayer;
+        function highlightFeature(e) {
+            highlightLayer = e.target;
+
+            if (e.target.feature.geometry.type === 'LineString' || e.target.feature.geometry.type === 'MultiLineString') {
+              highlightLayer.setStyle({
+                color: '#ffff00',
+              });
+            } else {
+              highlightLayer.setStyle({
+                fillColor: '#ffff00',
+                fillOpacity: 1
+              });
+            }
+        }
+
+        // Load Leaflet map
         var map = L.map('map', {
-            zoomControl:false, maxZoom:16, minZoom:8
-        }).fitBounds([[13.867715104085224,121.20130249721517],[13.88048157218487,121.22349899828765]]);
+            zoomControl: false,
+            maxZoom: 24,
+            minZoom: 13,
+            scrollWheelZoom: true,
+            wheelDebounceTime: 150,     // Increased debounce time
+            wheelPxPerZoomLevel: 120,   // Increased pixels per zoom level
+            zoomSnap: 0.5,
+            zoomDelta: 0.5,
+            preferCanvas: true,         // Use Canvas renderer for better performance
+            updateWhenZooming: false,   // Delay update until zoom ends
+            updateWhenIdle: true,       // Only update when map is idle
+        });
+
+        // ✅ Reduce zooming sensitivity
+        // map.options.zoomSnap = 0.5;  // Make zoom steps smaller
+        // map.options.zoomDelta = 0.5; // Reduce zoom step sensitivity
+
+        // Check if there's a stored view (center & zoom)
+        var storedView = localStorage.getItem('mapView');
+
+        if (storedView) {
+            var view = JSON.parse(storedView);
+            map.setView(view.center, view.zoom);
+        } else {
+            // Fit to Padre Garcia boundary if no saved view
+            map.fitBounds([[13.88005510304514,121.2057414823282], [13.885586665519138,121.21539261014819]]);
+        }
+
+        // Save current view when moving
+        map.on('moveend', function () {
+            var center = map.getCenter();
+            var zoom = map.getZoom();
+            localStorage.setItem('mapView', JSON.stringify({ center, zoom }));
+        });
+
+        var userLayer = L.layerGroup().addTo(map); // Layer for user-added markers
+        var selectedLatLng = null; // Store clicked location
         var hash = new L.Hash(map);
+        var lastClickedBarangay = null; // ✅ Store the last barangay clicked
+        
         map.attributionControl.setPrefix('<a href="https://github.com/tomchadwin/qgis2web" target="_blank">qgis2web</a> &middot; <a href="https://leafletjs.com" title="A JS library for interactive maps">Leaflet</a> &middot; <a href="https://qgis.org">QGIS</a>');
         var autolinker = new Autolinker({truncate: {length: 30, location: 'smart'}});
+        
         // remove popup's row if "visible-with-data"
         function removeEmptyRowsFromPopupContent(content, feature) {
          var tempDiv = document.createElement('div');
@@ -65,6 +150,7 @@
          }
          return tempDiv.innerHTML;
         }
+
         // add class to format popup if it contains media
 		function addClassToPopupIfMedia(content, popup) {
 			var tempDiv = document.createElement('div');
@@ -103,13 +189,27 @@
             opacity: 1.0,
             attribution: '',
             minZoom: 8,
-            maxZoom: 16,
-            minNativeZoom: 0,
-            maxNativeZoom: 19
+            maxZoom: 24,
+            updateWhenIdle: true,
+            updateWhenZooming: false,   // Don't update while zooming
+            keepBuffer: 2,              // Keep more tiles in buffer
+            maxNativeZoom: 19,         // Limit max zoom for tiles
+            reuseTiles: true,          // Reuse tile objects
         });
         layer_OpenStreetMap_0;
         map.addLayer(layer_OpenStreetMap_0);
+
         function pop_PG_Brgy_Boundary_Cadastral_edited_1(feature, layer) {
+            layer.on({
+                mouseout: function(e) {
+                    for (var i in e.target._eventParents) {
+                        if (typeof e.target._eventParents[i].resetStyle === 'function') {
+                            e.target._eventParents[i].resetStyle(e.target);
+                        }
+                    }
+                },
+                mouseover: highlightFeature,
+            });
             var popupContent = '<table>\
                     <tr>\
                         <td colspan="2">' + (feature.properties['Barangay'] !== null ? autolinker.link(String(feature.properties['Barangay']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
@@ -135,25 +235,128 @@
                 lineJoin: 'bevel',
                 weight: 2.0,
                 fillOpacity: 0,
-                interactive: false,
+                interactive: true,
             }
         }
+       
         map.createPane('pane_PG_Brgy_Boundary_Cadastral_edited_1');
         map.getPane('pane_PG_Brgy_Boundary_Cadastral_edited_1').style.zIndex = 401;
         map.getPane('pane_PG_Brgy_Boundary_Cadastral_edited_1').style['mix-blend-mode'] = 'normal';
+        
+        function zoomToBarangay(e, feature) {
+            var barangayName = feature.properties.Barangay || "Unknown Barangay";
+
+            // ✅ Prevent re-zooming if clicking the same barangay
+            if (lastClickedBarangay === barangayName) {
+                console.log("Already zoomed to this barangay, ignoring.");
+                return;
+            }
+
+            lastClickedBarangay = barangayName; // ✅ Update the last clicked barangay
+
+            var layer = e.target;
+            var bounds = layer.getBounds();
+
+            // Calculate center point of the barangay
+            var center = bounds.getCenter();
+
+            layer.setStyle({
+                color: "blue",
+                weight: 2,
+                fillColor: "rgba(0, 0, 255, 0.4)",
+                fillOpacity: 0.5
+            });
+
+            // ✅ Zoom smoothly to the barangay
+            map.flyToBounds(bounds, {
+                padding: [50, 50],
+                maxZoom: 18,
+                duration: 0.8
+            });
+
+            // ✅ Show the popup with barangay name
+            layer.bindPopup(`<b>Barangay:</b> ${barangayName}`).openPopup();
+        }
+        
         var layer_PG_Brgy_Boundary_Cadastral_edited_1 = new L.geoJson(json_PG_Brgy_Boundary_Cadastral_edited_1, {
             attribution: '',
-            interactive: false,
+            interactive: true,
             dataVar: 'json_PG_Brgy_Boundary_Cadastral_edited_1',
             layerName: 'layer_PG_Brgy_Boundary_Cadastral_edited_1',
             pane: 'pane_PG_Brgy_Boundary_Cadastral_edited_1',
             onEachFeature: pop_PG_Brgy_Boundary_Cadastral_edited_1,
             style: style_PG_Brgy_Boundary_Cadastral_edited_1_0,
+            renderer: L.canvas(),      // Use canvas renderer
+            maxZoom: 24,
+            tolerance: 3,             // Simplify geometries when zooming out
+            onEachFeature: function (feature, layer) {
+                layer.on({
+                    mouseover: function (e) {
+                        e.target.setStyle({ fillColor: 'rgba(0, 0, 255, 0.4)', fillOpacity: 0.5 });
+                    },
+                    mouseout: function (e) {
+                        layer.setStyle(style_PG_Brgy_Boundary_Cadastral_edited_1_0()); // Reset style on mouseout
+                    },
+                    click: function (e) {
+                        zoomToBarangay(e, feature); // ✅ Adjusts zoom & centers camera
+
+                        // ✅ Get clicked location (latitude & longitude)
+                        var lat = e.latlng.lat;
+                        var lng = e.latlng.lng;
+
+                        // ✅ Generate Google Street View URL
+                        var streetViewUrl = `https://www.google.com/maps?q=&layer=c&cbll=${lat},${lng}`;
+
+                        // ✅ Show a popup with a Street View link
+                        layer.bindPopup(`
+                            <b>Barangay:</b> ${feature.properties.Barangay || "Unknown Barangay"}<br>
+                            <a href="${streetViewUrl}" target="_blank">📍 View in Google Street View</a>
+                        `).openPopup();
+                    }
+                });
+
+                // ✅ Optional: Show barangay name in a popup
+                var barangayName = feature.properties.Barangay || "Unknown Barangay";
+                layer.bindPopup(`<b>Barangay:</b> ${barangayName}`);
+            }
         });
         bounds_group.addLayer(layer_PG_Brgy_Boundary_Cadastral_edited_1);
         map.addLayer(layer_PG_Brgy_Boundary_Cadastral_edited_1);
+        layer_PG_Brgy_Boundary_Cadastral_edited_1.on("click", function (e) {
+            selectedLatLng = e.latlng; // Store clicked location
+            document.getElementById("location").value = `Lat: ${e.latlng.lat.toFixed(6)}, Lng: ${e.latlng.lng.toFixed(6)}`;
+        });
+        
         function pop_Buildings_2(feature, layer) {
+            layer.on({
+                mouseout: function(e) {
+                    for (var i in e.target._eventParents) {
+                        if (typeof e.target._eventParents[i].resetStyle === 'function') {
+                            e.target._eventParents[i].resetStyle(e.target);
+                        }
+                    }
+                },
+                mouseover: highlightFeature,
+            });
             var popupContent = '<table>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['full_id'] !== null ? autolinker.link(String(feature.properties['full_id']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['osm_id'] !== null ? autolinker.link(String(feature.properties['osm_id']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['osm_type'] !== null ? autolinker.link(String(feature.properties['osm_type']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['building'] !== null ? autolinker.link(String(feature.properties['building']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['name_en'] !== null ? autolinker.link(String(feature.properties['name_en']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
+                    <tr>\
+                        <td colspan="2">' + (feature.properties['name'] !== null ? autolinker.link(String(feature.properties['name']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
+                    </tr>\
                     <tr>\
                         <td colspan="2">' + (feature.properties['amenity'] !== null ? autolinker.link(String(feature.properties['amenity']).replace(/'/g, '\'').toLocaleString()) : '') + '</td>\
                     </tr>\
@@ -193,11 +396,13 @@
                 fillOpacity: 1,
                 fillColor: 'rgba(190,178,151,1.0)',
                 interactive: true,
+                clickable: true,
             }
         }
         map.createPane('pane_Buildings_2');
-        map.getPane('pane_Buildings_2').style.zIndex = 402;
+        map.getPane('pane_Buildings_2').style.zIndex = 403;
         map.getPane('pane_Buildings_2').style['mix-blend-mode'] = 'normal';
+        
         var layer_Buildings_2 = new L.geoJson(json_Buildings_2, {
             attribution: '',
             interactive: true,
@@ -210,6 +415,7 @@
         bounds_group.addLayer(layer_Buildings_2);
         map.addLayer(layer_Buildings_2);
         setBounds();
+       
         var i = 0;
         layer_PG_Brgy_Boundary_Cadastral_edited_1.eachLayer(function(layer) {
             var context = {
@@ -223,6 +429,7 @@
               addLabel(layer, i);
               i++;
         });
+
         map.addControl(new L.Control.Search({
             layer: layer_Buildings_2,
             initial: false,
@@ -230,15 +437,125 @@
             propertyName: 'name'}));
         document.getElementsByClassName('search-button')[0].className +=
          ' fa fa-binoculars';
-        resetLabels([layer_PG_Brgy_Boundary_Cadastral_edited_1,layer_Buildings_2]);
-        map.on("zoomend", function(){
-            resetLabels([layer_PG_Brgy_Boundary_Cadastral_edited_1,layer_Buildings_2]);
+        
+        map.on('click', function (e) {
+            var clickedBarangay = null;
+
+            // ✅ Check if the click is inside any barangay
+            layer_PG_Brgy_Boundary_Cadastral_edited_1_0.eachLayer(function (layer) {
+                if (layer.getBounds().contains(e.latlng)) {
+                    clickedBarangay = layer.feature.properties.Barangay;
+                }
+            });
+
+            // ✅ If clicking inside the last selected barangay, do nothing
+            if (clickedBarangay === lastClickedBarangay) {
+                console.log("Clicked inside the same barangay, ignoring.");
+                return;
+            }
+
+            console.log("Clicked outside barangay, ignoring.");
+    
+            if (isInsideBoundary(e.latlng, layer_PG_Brgy_Boundary_Cadastral_edited_1_0)) {
+                var lat = e.latlng.lat;
+                var lng = e.latlng.lng;
+
+                // ✅ Add a marker only inside the boundary
+                L.marker([lat, lng]).addTo(map)
+                    .bindPopup(`Latitude: ${lat}<br>Longitude: ${lng}`)
+                    .openPopup();
+            } else {
+                alert("You can only add markers inside Padre Garcia.");
+            }
         });
-        map.on("layeradd", function(){
-            resetLabels([layer_PG_Brgy_Boundary_Cadastral_edited_1,layer_Buildings_2]);
+
+        document.getElementById("locationForm").addEventListener("submit", function (event) {
+            event.preventDefault(); // Prevents page refresh
+
+            if (!selectedLatLng) {
+                alert("Please click inside the boundary to select a location.");
+                return;
+            }
+
+            var description = document.getElementById("description").value.trim();
+            if (!description) {
+                alert("Please enter a description.");
+                return;
+            }
+
+            var newPoint = { lat: selectedLatLng.lat, lng: selectedLatLng.lng, description };
+
+            // ✅ Add marker to map
+            addMarker(newPoint);
+
+            // ✅ Save to localStorage
+            var existingData = localStorage.getItem("userPoints");
+            var points = existingData ? JSON.parse(existingData) : [];
+            points.push(newPoint);
+            localStorage.setItem("userPoints", JSON.stringify(points));
+
+            // ✅ Reset form fields
+            document.getElementById("location").value = "";
+            document.getElementById("description").value = "";
+            selectedLatLng = null;
         });
-        map.on("layerremove", function(){
-            resetLabels([layer_PG_Brgy_Boundary_Cadastral_edited_1,layer_Buildings_2]);
+
+        // ✅ Function to add marker
+        function addMarker(point) {
+            var marker = L.marker([point.lat, point.lng])
+                .addTo(userLayer)
+                .bindPopup(`
+                    <b>Location:</b> ${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}<br>
+                    <b>Description:</b> ${point.description}<br><br>
+                    <button onclick="deleteMarker(${point.lat}, ${point.lng})">❌ Delete</button>`)
+                .openPopup();
+                
+            // ✅ Store the marker reference for future updates/deletions
+            marker._customData = point;
+        }
+
+        // ✅ Function to delete marker
+        function deleteMarker(lat, lng) {
+            // ✅ Remove marker from map
+            userLayer.eachLayer(function (layer) {
+                if (layer._customData && layer._customData.lat === lat && layer._customData.lng === lng) {
+                    userLayer.removeLayer(layer);
+                }
+            });
+
+            // ✅ Remove from localStorage
+            var savedData = localStorage.getItem("userPoints");
+            if (savedData) {
+                var points = JSON.parse(savedData);
+                var updatedPoints = points.filter(p => p.lat !== lat || p.lng !== lng);
+                localStorage.setItem("userPoints", JSON.stringify(updatedPoints));
+            }
+        }
+        
+        // ✅ Load existing markers from localStorage on page load
+        function loadSavedMarkers() {
+            var savedData = localStorage.getItem("userPoints");
+            if (savedData) {
+                JSON.parse(savedData).forEach(addMarker);
+            }
+        }
+        loadSavedMarkers();
+
+        // loading....
+        document.addEventListener('DOMContentLoaded', function() {
+            var loadingCheck = setInterval(function() {
+                // Check if the document is still loading
+                if (document.readyState === 'complete') {
+                    document.getElementById('loader-container').classList.add('loader-hidden');
+                    clearInterval(loadingCheck);
+                }
+            }, 100);
+        
+            // Fallback - hide loader after 5 seconds maximum
+            setTimeout(function() {
+                document.getElementById('loader-container').classList.add('loader-hidden');
+                clearInterval(loadingCheck);
+            }, 5000);
         });
         </script>
     </body>
