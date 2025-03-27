@@ -11,19 +11,25 @@
         <!-- OR: Use local if you prefer -->
         <link rel="stylesheet" href="css/leaflet.css">
         <link rel="stylesheet" href="css/style.css">
+        <!-- Add Leaflet Draw CSS -->
+        <link rel="stylesheet" href="css/leaflet.draw.css">
 
         <!-- Other Required CSS -->
         <link rel="stylesheet" href="css/L.Control.Locate.min.css">
         <link rel="stylesheet" href="css/qgis2web.css">
         <link rel="stylesheet" href="css/fontawesome-all.min.css">
         <link rel="stylesheet" href="css/leaflet-search.css">
-        <link rel="stylesheet" href="css/leaflet-control-geocoder.Geocoder.css">
+        <!-- <link rel="stylesheet" href="css/leaflet-control-geocoder.Geocoder.css"> -->
         <link rel="stylesheet" href="css/leaflet-measure.css">
-
+        
         <!-- Leaflet JS (Use only one: CDN or local) -->
         <!-- <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script> -->
         <!-- OR: Use local if you prefer -->
         <script src="js/leaflet.js"></script>
+
+        <!-- Add Leaflet Draw JS -->
+        <script src="js/leaflet.draw.js"></script>
+        
         <title>Sample Mapping</title>
     </head>
     <body>
@@ -46,16 +52,16 @@
 
         <div id="legend">
             <h4>Legend</h4>
-            <ul>
+            <ul id="legend-list">
                 <li><span style="background: rgba(190,178,151,1.0); width: 10px; height: 10px; display: inline-block;"></span> Buildings</li>
             </ul>
         </div>
-
+        
         <div id="map">
         </div>
         <!-- Scripts -->
         <script src="js/qgis2web_expressions.js"></script>
-        <script src="js/leaflet.js"></script>
+        <!-- <script src="js/leaflet.js"></script> -->
         <!-- <script src="js/L.Control.Layers.Tree.min.js"></script> -->
         <script src="js/L.Control.Locate.min.js"></script>
         <script src="js/leaflet.rotatedMarker.js"></script>
@@ -198,6 +204,130 @@
         });
         layer_OpenStreetMap_0;
         map.addLayer(layer_OpenStreetMap_0);
+    
+        // ✅ Initialize Feature Group for Drawn Shapes
+        var drawnItems = new L.FeatureGroup();
+        map.addLayer(drawnItems);
+
+        // ✅ Load saved shapes from localStorage
+        function loadSavedShapes() {
+            var savedShapes = localStorage.getItem("drawnShapes");
+            if (savedShapes) {
+                JSON.parse(savedShapes).forEach(function (geojson) {
+                    var layer = L.geoJson(geojson, {
+                        style: function (feature) {
+                            return { color: feature.properties.color || "blue" };
+                        }
+                    });
+                    layer.eachLayer(function (l) {
+                        drawnItems.addLayer(l);
+                        updateLegend(l.feature.properties.hazard, l.feature.properties.color);
+                    });
+                });
+            }
+        }
+        loadSavedShapes();
+
+        // ✅ Save shapes to localStorage
+        function saveShapesToLocalStorage() {
+            var shapes = [];
+            drawnItems.eachLayer(function (layer) {
+                var geojson = layer.toGeoJSON();
+                geojson.properties = geojson.properties || {}; // Ensure properties exist
+                geojson.properties.color = layer.options.color || "blue";
+                geojson.properties.hazard = layer.options.hazard || "Unknown";
+                shapes.push(geojson);
+            });
+            localStorage.setItem("drawnShapes", JSON.stringify(shapes));
+        }
+
+        // ✅ Add Leaflet Draw Controls
+        var drawControl = new L.Control.Draw({
+            edit: {
+                featureGroup: drawnItems,
+                remove: true
+            },
+            draw: {
+                polygon: {
+                    allowIntersection: false,
+                    shapeOptions: { color: "blue" }
+                },
+                polyline: { shapeOptions: { color: "blue" } },
+                rectangle: { shapeOptions: { color: "blue" } },
+                circle: { shapeOptions: { color: "blue" } },
+                marker: true
+            }
+        });
+        map.addControl(drawControl);
+
+        // ✅ Restrict drawing to barangay boundary
+        map.on(L.Draw.Event.CREATED, function (event) {
+            var layer = event.layer;
+
+            // ✅ Check if the drawn shape is inside the barangay boundary
+            var isInsideBoundary = false;
+            layer_PG_Brgy_Boundary_Cadastral_edited_1.eachLayer(function (boundaryLayer) {
+                if (layer.getBounds && boundaryLayer.getBounds().contains(layer.getBounds().getCenter())) {
+                    isInsideBoundary = true;
+                } else if (layer.getLatLng && boundaryLayer.getBounds().contains(layer.getLatLng())) {
+                    isInsideBoundary = true;
+                }
+            });
+
+            if (!isInsideBoundary) {
+                alert("You can only draw inside the barangay boundary.");
+                return;
+            }
+
+            // ✅ Prompt user for hazard type and color
+            var hazardType = prompt("Enter hazard type (e.g., Fire, Flood, Earthquake, etc.):");
+            if (!hazardType) {
+                alert("You must enter a hazard type.");
+                return;
+            }
+
+            var color = prompt("Enter a color for this hazard (e.g., red, blue, green, etc.):");
+            if (!color) {
+                alert("You must enter a color.");
+                return;
+            }
+
+            // ✅ Apply user-selected color and hazard type
+            if (layer.setStyle) {
+                layer.setStyle({ color: color });
+            }
+            layer.options.color = color;
+            layer.options.hazard = hazardType;
+
+            // ✅ Add to map and save to localStorage
+            drawnItems.addLayer(layer);
+            saveShapesToLocalStorage();
+            updateLegend(hazardType, color);
+        });
+
+        // ✅ Save shapes when edited or deleted
+        map.on(L.Draw.Event.EDITED, saveShapesToLocalStorage);
+        map.on(L.Draw.Event.DELETED, saveShapesToLocalStorage);
+
+        // ✅ Update legend dynamically
+        function updateLegend(hazard, color) {
+            var legend = document.getElementById("legend-list");
+            if (!legend) return;
+
+            // Check if hazard already exists in the legend
+            var existingItems = legend.getElementsByTagName("li");
+            for (var i = 0; i < existingItems.length; i++) {
+                if (existingItems[i].dataset.hazard === hazard) {
+                    return; // Skip adding duplicate hazards
+                }
+            }
+
+            // ✅ Create new legend item
+            var listItem = document.createElement("li");
+            listItem.dataset.hazard = hazard;
+            listItem.innerHTML = `<span style="background: ${color}; width: 10px; height: 10px; display: inline-block; margin-right: 5px;"></span> ${hazard}`;
+            legend.appendChild(listItem);
+        }
 
         function pop_PG_Brgy_Boundary_Cadastral_edited_1(feature, layer) {
             layer.on({
