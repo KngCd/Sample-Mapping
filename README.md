@@ -1,1 +1,1 @@
-[Visit Map](https://kngcd.github.io/SampleMapping/incident_report.html)
+[Visit Map](https://kngcd.github.io/Sample-Mapping/incident_report.html)
